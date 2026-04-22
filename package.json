@@ -1,13 +1,31 @@
 {
   "name": "@laplace-live/facet",
-  "module": "src/index.ts",
   "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "build": "tsdown",
+    "check": "tsc --noEmit",
+    "test": "bun test --timeout 5000",
+    "prepublishOnly": "bun run build",
+    "release": "changeset publish",
+    "version": "changeset version",
     "lint": "biome check"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
+    "@changesets/cli": "^2.31.0",
     "@types/bun": "^1.3.12",
-    "typescript": "^6.0.3"
+    "tsdown": "^0.21.9",
+    "typescript": "^5.9.3"
   }
 }
