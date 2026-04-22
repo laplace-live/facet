@@ -21,6 +21,15 @@
     "version": "changeset version",
     "lint": "biome check"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laplace-live/facet.git"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
     "@changesets/cli": "^2.31.0",
