@@ -1,0 +1,13 @@
+.git
+.gitattributes
+.github
+.gitignore
+*.md
+!README.md
+.npmignore
+.vscode
+node_modules
+test/
+*.config.*
+biome.jsonc
+tsconfig.json

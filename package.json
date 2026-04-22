@@ -28,6 +28,7 @@
     "url": "git+https://github.com/laplace-live/facet.git"
   },
   "license": "MIT",
+  "homepage": "https://github.com/laplace-live/facet#readme",
   "publishConfig": {
     "access": "public",
     "provenance": true
