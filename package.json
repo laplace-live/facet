@@ -1,6 +1,6 @@
 {
   "name": "@laplace.live/facet",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Tiny parser for Gmail-style faceted search queries",
   "type": "module",
   "main": "./dist/index.mjs",
