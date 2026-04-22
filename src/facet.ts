@@ -7,6 +7,16 @@ const IN_TEXT = 'IN_TEXT'
 const SINGLE_QUOTE = 'SINGLE_QUOTE'
 const DOUBLE_QUOTE = 'DOUBLE_QUOTE'
 
+// Shared empty quote-pair map used when the input contains no quote
+// characters. Frozen because the parser only reads from it.
+const EMPTY_QUOTE_PAIR_MAP = Object.freeze({ single: {}, double: {} }) as {
+  single: Record<number, boolean>
+  double: Record<number, boolean>
+}
+
+// Hoisted regex so toString doesn't recompile it on every value.
+const DOUBLE_QUOTE_RE = /"/g
+
 export interface Condition {
   keyword: string
   value: string
@@ -75,11 +85,11 @@ export default class Facet {
       }
     }
 
-    let state: string
+    let state: string = RESET
     let currentOperand = ''
     let isNegated = false
     let currentText = ''
-    let quoteState: string
+    let quoteState: string = RESET
     let prevChar = ''
 
     const performReset = () => {
@@ -96,72 +106,70 @@ export default class Facet {
     // 'joe@acme.com' is the operand
     // 'to:joe@acme.com' is the condition
 
-    // Possible states:
-    const inText = () => state === IN_TEXT // could be inside raw text or operator
-    const inOperand = () => state === IN_OPERAND
-    const inSingleQuote = () => quoteState === SINGLE_QUOTE
-    const inDoubleQuote = () => quoteState === DOUBLE_QUOTE
-    const inQuote = () => inSingleQuote() || inDoubleQuote()
-
     performReset()
 
-    const quotePairMap = getQuotePairMap(str)
+    // Skip the quote-pair pre-scan when the input contains no quotes —
+    // it's a full O(n) pass, and the vast majority of real queries have
+    // no quote characters at all. `String.prototype.indexOf` is heavily
+    // vectorized in V8 and bails out far faster than the JS scanner.
+    const hasQuote = str.indexOf('"') !== -1 || str.indexOf("'") !== -1
+    const quotePairMap = hasQuote ? getQuotePairMap(str) : EMPTY_QUOTE_PAIR_MAP
 
     for (let i = 0; i < str.length; i++) {
       const char = str[i]
       if (char === ' ') {
-        if (inOperand()) {
-          if (inQuote()) {
+        if (state === IN_OPERAND) {
+          if (quoteState !== RESET) {
             currentOperand += char
           } else {
             addCondition(currentText, currentOperand, isNegated)
             performReset()
           }
-        } else if (inText()) {
-          if (inQuote()) {
+        } else if (state === IN_TEXT) {
+          if (quoteState !== RESET) {
             currentText += char
           } else {
             addTextSegment(currentText, isNegated)
             performReset()
           }
         }
-      } else if (char === ',' && inOperand() && !inQuote()) {
+      } else if (char === ',' && state === IN_OPERAND && quoteState === RESET) {
         addCondition(currentText, currentOperand, isNegated)
         // No reset here because we are still evaluating operands for the same operator
         currentOperand = ''
-      } else if (char === '-' && !inOperand() && !inText()) {
+      } else if (char === '-' && state !== IN_OPERAND && state !== IN_TEXT) {
         isNegated = true
-      } else if (char === ':' && !inQuote()) {
-        if (inOperand()) {
+      } else if (char === ':' && quoteState === RESET) {
+        if (state === IN_OPERAND) {
           // If we're in an operand, just push the string on.
           currentOperand += char
-        } else if (inText()) {
+        } else if (state === IN_TEXT) {
           // Skip this char, move states into IN_OPERAND,
           state = IN_OPERAND
         }
-      } else if (char === '"' && prevChar !== '\\' && !inSingleQuote()) {
-        if (inDoubleQuote()) {
+      } else if (char === '"' && prevChar !== '\\' && quoteState !== SINGLE_QUOTE) {
+        if (quoteState === DOUBLE_QUOTE) {
           quoteState = RESET
         } else if (quotePairMap.double[i]) {
           quoteState = DOUBLE_QUOTE
-        } else if (inOperand()) {
+        } else if (state === IN_OPERAND) {
           currentOperand += char
         } else {
           currentText += char
         }
-      } else if (char === "'" && prevChar !== '\\' && !inDoubleQuote()) {
-        if (inSingleQuote()) {
+      } else if (char === "'" && prevChar !== '\\' && quoteState !== DOUBLE_QUOTE) {
+        if (quoteState === SINGLE_QUOTE) {
           quoteState = RESET
         } else if (quotePairMap.single[i]) {
           quoteState = SINGLE_QUOTE
-        } else if (inOperand()) {
+        } else if (state === IN_OPERAND) {
           currentOperand += char
         } else {
           currentText += char
         }
       } else if (char !== '\\') {
         // Regular character..
-        if (inOperand()) {
+        if (state === IN_OPERAND) {
           currentOperand += char
         } else {
           currentText += char
@@ -171,9 +179,9 @@ export default class Facet {
       prevChar = char ?? ''
     }
     // End of string, add any last entries
-    if (inText()) {
+    if (state === IN_TEXT) {
       addTextSegment(currentText, isNegated)
-    } else if (inOperand()) {
+    } else if (state === IN_OPERAND) {
       addCondition(currentText, currentOperand, isNegated)
     }
 
@@ -292,40 +300,33 @@ export default class Facet {
     if (this.isStringDirty) {
       // Group keyword, negated pairs as keys
       const conditionGroups: Record<string, string[]> = {}
-      this.conditionArray.forEach(({ keyword, value, negated }) => {
-        const negatedStr = negated ? '-' : ''
-        const conditionGroupKey = `${negatedStr}${keyword}`
-        if (conditionGroups[conditionGroupKey]) {
-          conditionGroups[conditionGroupKey].push(value)
-        } else {
-          conditionGroups[conditionGroupKey] = [value]
-        }
-      })
+      for (const { keyword, value, negated } of this.conditionArray) {
+        const groupKey = negated ? `-${keyword}` : keyword
+        const existing = conditionGroups[groupKey]
+        if (existing) existing.push(value)
+        else conditionGroups[groupKey] = [value]
+      }
       // Build conditionStr
       let conditionStr = ''
-      Object.entries(conditionGroups).forEach(([conditionGroupKey, values]) => {
-        const safeValues = values
-          .filter(v => v)
-          .map(v => {
-            let newV = ''
-            let shouldQuote = false
-            for (let i = 0; i < v.length; i++) {
-              const char = v[i]
-              if (char === '"') {
-                newV += '\\"'
-              } else {
-                if (char === ' ' || char === ',') {
-                  shouldQuote = true
-                }
-                newV += char
-              }
-            }
-            return shouldQuote ? `"${newV}"` : newV
-          })
-        if (safeValues.length > 0) {
-          conditionStr += ` ${conditionGroupKey}:${safeValues.join(',')}`
+      for (const groupKey in conditionGroups) {
+        const values = conditionGroups[groupKey]
+        if (!values) continue
+        const safeValues: string[] = []
+        for (const v of values) {
+          if (!v) continue
+          // Three vectorized indexOf scans beat one JS char loop in V8
+          // for the overwhelmingly common case of "value contains none of
+          // these chars". Only fall back to replace() when we actually
+          // need to escape inner double quotes.
+          const hasDoubleQuote = v.indexOf('"') !== -1
+          const needsQuote = hasDoubleQuote || v.indexOf(' ') !== -1 || v.indexOf(',') !== -1
+          const safe = hasDoubleQuote ? v.replace(DOUBLE_QUOTE_RE, '\\"') : v
+          safeValues.push(needsQuote ? `"${safe}"` : safe)
         }
-      })
+        if (safeValues.length > 0) {
+          conditionStr += ` ${groupKey}:${safeValues.join(',')}`
+        }
+      }
       this.string = `${conditionStr} ${this.getAllText()}`.trim()
       this.isStringDirty = false
     }
