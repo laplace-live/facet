@@ -28,7 +28,7 @@
     "type": "git",
     "url": "git+https://github.com/laplace-live/facet.git"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "homepage": "https://github.com/laplace-live/facet#readme",
   "publishConfig": {
     "access": "public",
