@@ -1,5 +1,12 @@
 # @laplace.live/facet
 
+## 0.0.4
+
+### Patch Changes
+
+- 584e4eb: update license
+- cdfecf9: update deps
+
 ## 0.0.3
 
 ### Patch Changes
