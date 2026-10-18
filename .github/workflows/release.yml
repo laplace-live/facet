@@ -38,3 +38,4 @@ jobs:
         with:
           publish-script: bun run release
           version-script: bun run version
+          commit-message: "Version Packages [skip ci]"
